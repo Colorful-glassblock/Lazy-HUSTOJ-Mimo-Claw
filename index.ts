@@ -47,6 +47,16 @@ async function getConfig(): Promise<Config> {
   console.log("║     全自动 HUSTOJ 刷题工具                    ║");
   console.log("╚══════════════════════════════════════════════╝\n");
 
+  // 支持环境变量或命令行参数: --server=xxx --user=xxx --pass=xxx
+  const envServer = process.env.HUSTOJ_SERVER || "";
+  const envUser = process.env.HUSTOJ_USER || "";
+  const envPass = process.env.HUSTOJ_PASS || "";
+
+  // 从命令行参数解析
+  const argServer = process.argv.find(a => a.startsWith("--server="))?.split("=")[1] || "";
+  const argUser = process.argv.find(a => a.startsWith("--user="))?.split("=")[1] || "";
+  const argPass = process.argv.find(a => a.startsWith("--pass="))?.split("=")[1] || "";
+
   // 尝试从配置文件读取（只保存 server 和 username，不保存密码）
   const configFile = join(TMP, "config.json");
   let savedServer = "";
@@ -60,9 +70,13 @@ async function getConfig(): Promise<Config> {
     } catch {}
   }
 
-  // 服务器地址
+  // 服务器地址: 参数 > 环境变量 > 配置文件 > 交互输入
   let server: string;
-  if (savedServer) {
+  if (argServer) {
+    server = argServer;
+  } else if (envServer) {
+    server = envServer;
+  } else if (savedServer) {
     const use = await ask(`上次服务器: ${savedServer}  回车使用，或输入新地址: `);
     server = use || savedServer;
   } else {
@@ -73,15 +87,26 @@ async function getConfig(): Promise<Config> {
 
   // 用户名
   let username: string;
-  if (savedUsername) {
+  if (argUser) {
+    username = argUser;
+  } else if (envUser) {
+    username = envUser;
+  } else if (savedUsername) {
     const use = await ask(`上次用户名: ${savedUsername}  回车使用，或输入新用户名: `);
     username = use || savedUsername;
   } else {
     username = await ask("用户名: ");
   }
 
-  // 密码（每次都要求输入，不保存）
-  const password = await ask("密码: ");
+  // 密码: 参数 > 环境变量 > 交互输入（不保存）
+  let password: string;
+  if (argPass) {
+    password = argPass;
+  } else if (envPass) {
+    password = envPass;
+  } else {
+    password = await ask("密码: ");
+  }
 
   // 只保存 server 和 username
   writeFileSync(configFile, JSON.stringify({ server, username }, null, 2));
@@ -315,25 +340,43 @@ async function submitOne(config: Config, pid: number, code: string): Promise<{ p
   const ref = br(`snapshot -i 2>&1 | grep -oP 'button "提交" \\[ref=\\K[^\\]]+'`);
   if (ref) { br(`click @${ref}`); sleep(5); br("wait --load networkidle"); }
 
-  for (let i = 0; i < 4; i++) {
-    const r = br(`snapshot -i 2>&1 | grep -A2 "${pid}"`);
-    const ms = Date.now() - t0;
-    if (r.includes("正确"))   return { pid, status: "AC", ms };
-    if (r.includes("编译错误")) return { pid, status: "CE", ms };
-    if (r.includes("答案错误")) return { pid, status: "WA", ms };
-    if (r.includes("时间超限")) return { pid, status: "TLE", ms };
-    if (r.includes("内存超限")) return { pid, status: "MLE", ms };
-    if (r.includes("运行错误")) return { pid, status: "RE", ms };
-    sleep(3);
+  // 等待结果并检查状态页最新提交（轮询最多5次，间隔递增）
+  let statusRaw = "NOT_FOUND";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    sleep(3 + attempt * 2);  // 3s, 5s, 7s, 9s, 11s
+    statusRaw = br(`eval '
+      var rows = document.querySelectorAll("tr");
+      var found = "";
+      for(var i=1;i<rows.length;i++){
+        var cells = rows[i].querySelectorAll("td");
+        if(cells.length>=4){
+          var p = cells[3]?.textContent?.trim();
+          var r = cells[4]?.textContent?.trim();
+          if(p==="${pid}"){ found = r; break; }
+        }
+      }
+      found || "NOT_FOUND";
+    '`).replace(/^"|"$/g, "");
+    if (!statusRaw.includes("编译中") && !statusRaw.includes("等待")) break;
   }
-  return { pid, status: "ERROR", ms: Date.now() - t0 };
+
+  const ms = Date.now() - t0;
+  if (statusRaw.includes("正确"))   return { pid, status: "AC", ms };
+  if (statusRaw.includes("编译错误")) return { pid, status: "CE", ms };
+  if (statusRaw.includes("答案错误")) return { pid, status: "WA", ms };
+  if (statusRaw.includes("时间超限")) return { pid, status: "TLE", ms };
+  if (statusRaw.includes("内存超限")) return { pid, status: "MLE", ms };
+  if (statusRaw.includes("运行错误")) return { pid, status: "RE", ms };
+  if (statusRaw.includes("输出超限")) return { pid, status: "OLE", ms };
+  if (statusRaw === "NOT_FOUND") return { pid, status: "ERROR", ms };
+  return { pid, status: "UNKNOWN:" + statusRaw, ms };
 }
 
 // ============================================================
 //  主流程
 // ============================================================
 
-const ICON: Record<string, string> = { AC: "✅", WA: "❌", CE: "⚙️", TLE: "⏰", MLE: "💾", RE: "💥", ERROR: "❓", SKIP: "⏭️" };
+const ICON: Record<string, string> = { AC: "✅", WA: "❌", CE: "⚙️", TLE: "⏰", MLE: "💾", RE: "💥", ERROR: "❓", OLE: "📤", SKIP: "⏭️" };
 
 async function main() {
   const config = await getConfig();
