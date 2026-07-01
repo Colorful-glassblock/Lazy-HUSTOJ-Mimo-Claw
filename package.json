@@ -5,12 +5,16 @@
   "type": "module",
   "scripts": {
     "start": "ts-node-esm index.ts",
-    "submit": "ts-node-esm index.ts"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "ts-node": "^10.9.0",
     "typescript": "^5.0.0",
     "@types/node": "^20.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
   },
   "keywords": ["hustoj", "oi", "competitive-programming", "ai", "mimo"],
   "license": "MIT"

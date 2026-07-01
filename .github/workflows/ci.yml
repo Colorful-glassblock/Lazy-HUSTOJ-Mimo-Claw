@@ -7,7 +7,7 @@ on:
     branches: [master]
 
 jobs:
-  type-check:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +15,7 @@ jobs:
         with:
           node-version: "20"
       - run: npm ci
-      - run: npx tsc --noEmit
+      - name: Type Check
+        run: npx tsc --noEmit
+      - name: Tests
+        run: npx vitest run
