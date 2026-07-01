@@ -1,0 +1,5 @@
+node_modules/
+.lazy-hustoj-tmp/
+dist/
+*.js
+!index.ts
